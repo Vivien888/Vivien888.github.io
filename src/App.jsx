@@ -181,6 +181,11 @@ const quotes = [
 ]
 
 const TODAY = new Date()
+const TODAY_KEY = [
+  TODAY.getFullYear(),
+  String(TODAY.getMonth() + 1).padStart(2, '0'),
+  String(TODAY.getDate()).padStart(2, '0'),
+].join('-')
 
 function useLocalState(key, initialValue) {
   const [value, setValue] = useState(() => {
@@ -594,17 +599,66 @@ function TodosPage({ todos, setTodos }) {
   const [filter, setFilter] = useState('all')
   const [text, setText] = useState('')
   const [type, setType] = useState('work')
-  const visible = todos.filter((todo) => filter === 'all' || todo.type === filter)
+  const [scope, setScope] = useState('today')
+  const [date, setDate] = useState(TODAY_KEY)
+  const normalized = todos.map((todo) => ({
+    ...todo,
+    scope: todo.scope || 'today',
+    date: todo.date || TODAY_KEY,
+  }))
+  const visible = normalized.filter((todo) => filter === 'all' || todo.type === filter)
+  const todayTodos = visible.filter((todo) => todo.scope === 'today' && todo.date === TODAY_KEY)
+  const longTodos = visible
+    .filter((todo) => todo.scope === 'long')
+    .sort((a, b) => a.date.localeCompare(b.date))
+  const todayDone = todayTodos.filter((todo) => todo.done).length
+  const todayCompletion = todayTodos.length ? Math.round(todayDone / todayTodos.length * 100) : 0
+
+  const longGroups = longTodos.reduce((groups, todo) => {
+    const key = todo.date || '未设置日期'
+    groups[key] = [...(groups[key] || []), todo]
+    return groups
+  }, {})
+
+  const formatTodoDate = (value) => {
+    if (value === TODAY_KEY) return '今天'
+    const [, month, day] = String(value).split('-')
+    return month && day ? `${Number(month)} 月 ${Number(day)} 日` : '未设置日期'
+  }
 
   const addTodo = () => {
     if (!text.trim()) return
-    setTodos((current) => [...current, { id: Date.now(), text: text.trim(), type, done: false }])
+    setTodos((current) => [...current, {
+      id: Date.now(),
+      text: text.trim(),
+      type,
+      scope,
+      date: scope === 'today' ? TODAY_KEY : date,
+      done: false,
+      completedDate: '',
+    }])
     setText('')
   }
 
   const toggle = (id) => setTodos((current) => current.map((todo) => (
-    todo.id === id ? { ...todo, done: !todo.done } : todo
+    todo.id === id ? {
+      ...todo,
+      done: !todo.done,
+      completedDate: todo.done ? '' : TODAY_KEY,
+    } : todo
   )))
+
+  const renderTodo = (todo, showDate = false) => (
+    <div className={`todo-item ${todo.done ? 'done' : ''}`} key={todo.id}>
+      <button className={`todo-check ${todo.type}`} onClick={() => toggle(todo.id)}>{todo.done && <Check size={14} />}</button>
+      <div className="todo-copy">
+        <span>{todo.text}</span>
+        {showDate && <small><CalendarDays size={11} />{formatTodoDate(todo.date)}</small>}
+      </div>
+      <small className={todo.type}>{todo.type === 'work' ? '工作' : '生活'}</small>
+      <button className="delete-button" onClick={() => setTodos((current) => current.filter((item) => item.id !== todo.id))}><X size={14} /></button>
+    </div>
+  )
 
   return (
     <div className="page">
@@ -612,7 +666,7 @@ function TodosPage({ todos, setTodos }) {
       <div className="todo-summary">
         <div><span className="summary-orb work"><BriefcaseBusiness size={20} /></span><div><strong>{todos.filter((item) => item.type === 'work' && !item.done).length}</strong><small>项工作待办</small></div></div>
         <div><span className="summary-orb life"><BookHeart size={20} /></span><div><strong>{todos.filter((item) => item.type === 'life' && !item.done).length}</strong><small>项生活待办</small></div></div>
-        <div className="completion"><span>今日完成度</span><strong>{todos.length ? Math.round(todos.filter((item) => item.done).length / todos.length * 100) : 0}%</strong><div className="progress-track"><span style={{ width: `${todos.length ? todos.filter((item) => item.done).length / todos.length * 100 : 0}%` }} /></div></div>
+        <div className="completion"><span>今日完成度 · {todayDone}/{todayTodos.length}</span><strong>{todayCompletion}%</strong><div className="progress-track"><span style={{ width: `${todayCompletion}%` }} /></div></div>
       </div>
 
       <section className="panel todo-panel">
@@ -626,9 +680,14 @@ function TodosPage({ todos, setTodos }) {
         </div>
 
         <div className="todo-add">
+          <div className="todo-scope-switch">
+            <button className={scope === 'today' ? 'active' : ''} onClick={() => { setScope('today'); setDate(TODAY_KEY) }}>今日</button>
+            <button className={scope === 'long' ? 'active' : ''} onClick={() => setScope('long')}>长期</button>
+          </div>
           <button className={`type-switch ${type}`} onClick={() => setType(type === 'work' ? 'life' : 'work')}>
             {type === 'work' ? '工作' : '生活'}
           </button>
+          <input className="todo-date-input" type="date" value={date} disabled={scope === 'today'} onChange={(event) => setDate(event.target.value)} aria-label="待办日期" />
           <input
             value={text}
             placeholder="添加一件要做的事，按回车保存"
@@ -639,15 +698,22 @@ function TodosPage({ todos, setTodos }) {
         </div>
 
         <div className="todo-list">
-          {visible.map((todo) => (
-            <div className={`todo-item ${todo.done ? 'done' : ''}`} key={todo.id}>
-              <button className={`todo-check ${todo.type}`} onClick={() => toggle(todo.id)}>{todo.done && <Check size={14} />}</button>
-              <span>{todo.text}</span>
-              <small className={todo.type}>{todo.type === 'work' ? '工作' : '生活'}</small>
-              <button className="delete-button" onClick={() => setTodos((current) => current.filter((item) => item.id !== todo.id))}><X size={14} /></button>
-            </div>
-          ))}
-          {!visible.length && <EmptyState icon={ClipboardCheck} text="这一栏还没有待办" />}
+          <div className="todo-section">
+            <div className="todo-section-title"><div><span>今日 Todo</span><small>{todayDone}/{todayTodos.length} 已完成</small></div><strong>{todayCompletion}%</strong></div>
+            {todayTodos.map((todo) => renderTodo(todo))}
+            {!todayTodos.length && <div className="todo-section-empty">今天还没有待办，给自己安排一件小事吧。</div>}
+          </div>
+
+          <div className="todo-section long-term">
+            <div className="todo-section-title"><div><span>长期 Todo</span><small>{longTodos.filter((todo) => !todo.done).length} 项待完成</small></div></div>
+            {Object.entries(longGroups).map(([groupDate, items]) => (
+              <div className="todo-date-group" key={groupDate}>
+                <span className="todo-date-label">{formatTodoDate(groupDate)}</span>
+                {items.map((todo) => renderTodo(todo, true))}
+              </div>
+            ))}
+            {!longTodos.length && <div className="todo-section-empty">还没有长期待办。</div>}
+          </div>
         </div>
       </section>
     </div>
